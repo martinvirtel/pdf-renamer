@@ -5,8 +5,8 @@
  SCANNER=/media/martin/SD_VOL/DCIM/100MEDIA/
  INBOX=./scanner-inbox
  ARCHIVE=./archive 
- ANNOTATED=./annotated
- PROJECT="PDF Annotator"
+ ANNOTATED=./named
+ PROJECT="PDF Renamer"
 
 
 
@@ -24,7 +24,7 @@ function errlog { echo "$@" 1>&2; }
 
 function from_scanner {
     if [ -e $1 ] ; then 
-        echo Reading from Scanner $1
+        errlog Reading from Scanner $1
 	    rsync -av $1 $INBOX
     fi
 }
@@ -36,7 +36,7 @@ function to_archive {
      if [ $1 -nt $fname ] ; then
         convert $1 $fname >/dev/null 2>&1 
         touch -r $1 $fname
-        echo Converted $1 to $fname
+        errlog Converted $1 to $fname
      fi
    else 
      fname=$1
@@ -44,14 +44,15 @@ function to_archive {
    export `md5sum --tag $fname  | sed "s_MD5 (_src=_;s_) = \(.*\)_ dest=$ARCHIVE/\1.pdf_;"`
    if [ $src -nt $dest ] ; then 
       cp -p $src $dest
-      echo Copied $src to $dest
+      errlog Copied $src to $dest
    fi
 }
 
 
 function annotate {
-   F=`test -e $1 && find $ARCHIVE -samefile $1 | tail -1`
-   test -e "$F" || (errlog "$F not found"; return 10)
+   test -e "$1" || return 10 
+   F=`find $ARCHIVE -samefile $1 | tail -1`
+   test -e "$F" || (errlog "$F \# not found"; return 10)
    okular --noraise --unique $F 2>/dev/null &
    if [ "$OKULARWINDOW" = "" ] ; then
     export OKULARPID=`ps ax | grep okular | sed -n '1s/^\([0-9]*\).*/\1/p'`
@@ -71,13 +72,12 @@ function annotate {
             bn=`basename $F`
             newannotated=`echo $ANNOTATED/$edited.pdf | sed "s/ /_/g;s_\(/[^:]*:\)\(.*\)_\1${bn}_"`
             ln $F $newannotated
-            errlog "$F to $newannotated"
             touchdate $newannotated
             if [ "$annotatedfile" != "" -a -f "$annotatedfile" ] ; then
                     rm $annotatedfile
-                    errlog $F from $annotatedfile to $newannotated
+                    errlog $F \# from $annotatedfile to $newannotated
             else 
-                    errlog $F to $newannotated
+                    errlog $F \# to $newannotated
             fi 
        fi 
   else 
@@ -129,22 +129,30 @@ fi
 # Starts here 
 
 
-echo Checking new arrivals.
-from_scanner $SCANNER
-for A in `ls $INBOX/*` ; do
-    to_archive $A
-done
 if [ "$*" == "" ] ; then
     glob=`find $ARCHIVE -type f -links 1`
-    export TITLE="$PROJECT - Annotating unannotated files"
+    export TITLE="$PROJECT - Naming unnamed files"
 elif [ "$1" == "all" ] ; then 
     glob=`find $ARCHIVE -type f`
-    export TITLE="$PROJECT - Annotating all files"
+    export TITLE="$PROJECT - Naming all files"
 else 
     glob="$*"
+    export TITLE="$PROJECT - Naming files from arguments"
 fi
+
+echo $TITLE >>$LOGFILE
+
+echo Checking new arrivals.
+from_scanner $SCANNER 2>>$LOGFILE
+for A in `ls $INBOX/*` ; do
+    to_archive $A  2>>$LOGFILE
+done
+
+
 for A in $glob ; do 
     annotate $A 2>>$LOGFILE || break
 done
 echo Done:
-cat $LOGFILE
+NOWFILE=$(date +%Y%m%d%H%M.log) 
+mv $LOGFILE $NOWFILE
+cat $NOWFILE
